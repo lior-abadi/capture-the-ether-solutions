@@ -31,7 +31,7 @@ describe("GuessTheSecretNumberChallenge", function () {
                 }  
             }
             // Checking win condition.
-            expect(await ethers.provider.getBalance(instanceAddr)).to.be.eq(ethers.BigNumber.from("0"))
+            expect(await ethers.provider.getBalance(instanceAddr)).to.be.eq(ethers.utils.parseEther("0"))
 
         });
     });

@@ -4,7 +4,13 @@ require("dotenv").config();
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
-  solidity: "0.4.21",
+  solidity: {
+    compilers: [
+      {version: "0.4.21",},
+      {version: "0.8.13",},
+      {version: "0.7.6"}
+    ]
+  },
   networks: {
     ropsten: {
       url: process.env.INFURA_ENDPOINT,

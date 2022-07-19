@@ -16,3 +16,8 @@ interface IGuessTheSecretNumberChallenge {
     
     function guess(uint8 n) external payable;
 }
+
+interface IGuessTheRandomNumberChallenge {
+    
+    function guess(uint8 n) external payable;
+}
