@@ -267,6 +267,30 @@ We can lock the guess as `bytes32(0)`, wait at least 256 blocks to be mined and 
 
 ### Token Sale
 
+This level requires identifying if it can be cracked by overflowing or underflowing (for more information about underflows and overflows check the first paragraph of the next level solution). Indeed if we get that `1 ether == 1 * 10**18`, we will realize that the `uint256` that tracks down the amount of ether is expressed in `wei`. We just need to overflow this check `numTokens * PRICE_PER_TOKEN` by passing a considerable big amount of `numTokens`, but it should also be controlled (passing a huge amount of tokens will also require to send more value which can be not desired). 
+
+A simple contract is created just as a helper to get those values:
+
+    pragma solidity ^0.4.21;
+
+    contract TokenSaleChallengeAttacker {
+        uint256 constant PRICE_PER_TOKEN = 1 ether;
+
+        uint256 public MaxUint256 = uint256(-1);
+
+        // Helper Functions
+        function getMaxAmountBeforeOverflow() external pure returns(uint256){
+            return (uint256(-1) / PRICE_PER_TOKEN);
+        }
+
+        function valueRequired(uint256 _amount) external pure returns(uint256){
+            return (_amount * PRICE_PER_TOKEN);
+        }
+    }
+
+The `getMaxAmountBeforeOverflow()` essentially calculates the maximum amount of tokens that we can buy before overflowing that multiplication. If we buy `getMaxAmountBeforeOverflow() + 1` tokens, that check will overflow and we will be able to send around `0.41 ETH` for the purchase of `getMaxAmountBeforeOverflow() + 1` tokens (which is a bargain). Because the `buy()` function also requires sending the exact value (instead of a more than value), this can also be calculated by passing `getMaxAmountBeforeOverflow() + 1` as an input parameter of `valueRequired()`.
+
+The we can simply call `sell(1)` and the level instance will have remaining around `0.41 ETH` and the win condition will be met. Lucky us that we are using test ether...
 
 ### Token Whale
 
@@ -303,3 +327,50 @@ This process can be done manually or by using a simple script.
             });
         });
     });
+
+
+### Retirement fund
+
+The main vulnerability of this level is within the `collectPenalty()` function while calculating the `withdrawn` amount. This calculation can be easily manipulated because the balance of a contract can be increased by three ways. Essentially, increasing the balance of the contract will make that `address(this).balance > startBalance` and it will underflow the `uint256` giving an extremely high value of `withdrawn` thus passing the following require and then performing the transfer.
+
+The first one is by sending a regular transfer to the contract. This is only possible if the contract implements a payable fallback function (such as a `fallback payable` itself or `receive payable`). Because the contract does not implement those functions, this way is discarded.
+
+The second one is by precalculating the address of the level contract and send 1 wei to that address. To do so, it is only needed to know the address of the deployer and the current nonce of that address. This Python script precalculates the address by knowing both the deployers' address and nonce (values that can be get by surfing etherscan for example):
+
+    import rlp
+    from eth_utils import keccak, to_checksum_address, to_bytes
+
+    def mk_contract_address(sender: str, nonce: int) -> str:
+        sender_bytes = to_bytes(hexstr=sender)
+        raw = rlp.encode([sender_bytes, nonce])
+        h = keccak(raw)
+        address_bytes = h[12:]
+        return to_checksum_address(address_bytes)
+
+
+    sender = "0x22699e6AdD7159C3C385bf4d7e1C647ddB3a99ea"
+    nonce = 4192
+
+    print(mk_contract_address(sender, nonce))
+
+This is how addresses are deterministically calculated. The printed value is indeed the precalculated address. Simply send a regular transfer of 1 before deploying the instance to slightly increase the contract balance.
+
+The third one is by selfdestructing a contract that has 1 wei towards the level. This will forcedly push the balance of the selfdestructed contract into the destination, generating the required imbalance that causes the underflow.
+
+The following contract performs this in one step:
+
+    pragma solidity ^0.8.13;
+
+    contract RetirementFundAttacker{
+        constructor(address _retirement) payable {
+            require(msg.value >= 1 wei);
+            _generateBalance(_retirement);
+        }
+
+        function _generateBalance(address _towards) internal {
+            selfdestruct(payable(_towards));
+        }
+    }
+
+
+Once the balance of the instance is slightly increased, it is needed to call `collectPenalty()` and that's it!

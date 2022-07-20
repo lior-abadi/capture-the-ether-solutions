@@ -29,4 +29,18 @@ interface ITokenWhaleChallenge{
     function transfer(address to, uint256 value) external;
     function isComplete() external view returns (bool);
     function balanceOf(address from) external view returns(uint256);
+
+}
+
+interface ITokenSaleChallenge{
+
+    function buy(uint256 numTokens) external payable;
+    function sell(uint256 numTokens) external;
+    function isComplete() external view returns (bool);
+}
+
+interface IRetirementFundChallenge{
+    
+    function collectPenalty() external;
+
 }

@@ -2,7 +2,7 @@ const {loadFixture} = require("@nomicfoundation/hardhat-network-helpers");
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("GuessTheNumber", function () {
+describe("GuessTheNumberChallenge", function () {
 
     // async function deployFixture() {
     //   const [owner] = await ethers.getSigners();
