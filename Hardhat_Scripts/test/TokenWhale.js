@@ -11,11 +11,11 @@ describe("TokenWhaleChallenge", function () {
             const instance = await ethers.getContractAt("ITokenWhaleChallenge", instanceAddr);
             
             const tx1 = await instance.connect(owner).approve(alice.address, 1);
-            await wait(tx1);
+            await tx1.wait;
             const tx2 = await instance.connect(alice).transferFrom(owner.address, ethers.constants.AddressZero, 1);
-            await wait(tx2);
+            await tx2.wait;
             const tx3 = await instance.connect(alice).transfer(owner.address, 2000000);
-            await wait(tx3);
+            await tx3.wait;
 
         });
     });

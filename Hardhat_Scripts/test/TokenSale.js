@@ -25,7 +25,7 @@ describe("TokenSaleChallenge", function () {
 
             await instance.connect(owner).buy(maxThatOverflows, {value: exactValue});
             const tx = await instance.connect(owner).sell(1); // Selling just 1 token will do the job.
-            await wait(tx);
+            await tx.wait();
 
             expect(await instance.isComplete()).to.be.true;
             
