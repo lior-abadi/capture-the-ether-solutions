@@ -14,8 +14,12 @@ module.exports = {
   networks: {
     ropsten: {
       url: process.env.INFURA_ENDPOINT,
-      accounts: [process.env.PKEY]
+      accounts: [process.env.PKEY1, process.env.PKEY2]
     }
+  },
+
+  mocha: {
+    timeout: 100000000
   }
 
 };

