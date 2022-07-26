@@ -44,3 +44,9 @@ interface IRetirementFundChallenge{
     function collectPenalty() external;
 
 }
+
+interface IPublicKeyChallenge {
+    function authenticate(bytes publicKey) external;
+    
+}
+

